@@ -2,38 +2,32 @@
 import { ref, onMounted, computed, watch } from 'vue';
 import axios from 'axios';
 
-// --- ESTADO ---
+// --- ESTADO PRINCIPAL ---
 const vista = ref('inicio');
 const usuario = ref(null);
 const esAdmin = computed(() => usuario.value && usuario.value.rol === 'admin');
 const modoRegistro = ref(false);
 
-// --- ESTADO DE COMPRA Y RESERVA ---
-const codigoQRReserva = ref(''); 
-const misReservas = ref([]); 
+// --- DATOS ---
+const codigoQRReserva = ref('');
+const misReservas = ref([]);
 const menus = ref([]);
 const tarifas = ref([]);
 const extrasList = ref([]);
 const reservasAdmin = ref([]);
-const ticketsPendientesAdmin = ref([]); // NUEVO: Solicitudes de entrada pendientes
+const ticketsPendientesAdmin = ref([]);
 
 // --- FORMULARIOS ---
 const cred = ref({ correo: '', contraseña: '' });
 const reg = ref({ nombre: '', apellido: '', correo: '', contraseña: '' });
 const formReserva = ref({ fecha: '', bloque: '', ninos: 10, id_menu: null, tematica: '', extrasSeleccionados: [] });
 
-// --- FORMULARIO DE PAGO DE ENTRADA ---
+// --- PAGO ---
 const tarifaSeleccionada = ref(null);
-const formPagoEntrada = ref({
-    numero_operacion: '',
-    monto_transferido: null,
-    fecha_transferencia: ''
-});
+const formPagoEntrada = ref({ numero_operacion: '', monto_transferido: null, fecha_transferencia: '' });
 
-// --- INFO ---
+// --- INFO FIJA ---
 const bloques = ["Mié-Jue: 15:00-17:00", "Mié-Jue: 18:00-20:00", "Vie-Sáb-Dom: 12:00-14:00", "Vie-Sáb-Dom: 15:00-17:00", "Vie-Sáb-Dom: 18:00-20:00"];
-
-// --- DATOS BANCARIOS REALES (Según tu info consolidada) ---
 const datosBancarios = {
     nombre: 'Entretenimientos Roca Ltda.',
     rut: '77.817.491-K',
@@ -42,7 +36,7 @@ const datosBancarios = {
     correo_aviso: 'clubkidschillan@gmail.com'
 };
 
-// --- CARGA ---
+// --- CARGA DE DATOS ---
 const cargarDatos = async () => {
   try {
     const [m, t, e] = await Promise.all([
@@ -51,27 +45,23 @@ const cargarDatos = async () => {
       axios.get('http://localhost:3000/api/extras')
     ]);
     menus.value = m.data; tarifas.value = t.data; extrasList.value = e.data;
-  } catch (e) { console.error("Error conexión backend"); }
+  } catch (e) { console.error("Error conectando al servidor"); }
 };
 
-// --- FUNCIÓN DE CARGA DE HISTORIAL POR CLIENTE ---
 const cargarMisReservas = async (id_cliente) => {
+    if (!id_cliente) return;
     try {
         const res = await axios.get(`http://localhost:3000/api/reservas/${id_cliente}`);
         misReservas.value = res.data;
-    } catch (e) {
-        console.error("Error al cargar mis reservas:", e);
-        misReservas.value = [];
+    } catch (e) { 
+        console.error("Error cargando reservas", e);
+        misReservas.value = []; 
     }
 };
 
-// --- WATCHER: Carga reservas cuando el usuario cambia de vista a 'misreservas' ---
 watch(vista, (newVista) => {
-    if (newVista === 'misreservas' && usuario.value) {
-        cargarMisReservas(usuario.value.id_cliente);
-    }
+    if (newVista === 'misreservas' && usuario.value) cargarMisReservas(usuario.value.id_cliente);
 });
-
 
 // --- AUTH ---
 const login = async () => {
@@ -79,139 +69,125 @@ const login = async () => {
     const res = await axios.post('http://localhost:3000/api/auth/login', cred.value);
     usuario.value = res.data.usuario;
     if (esAdmin.value) cargarAdmin();
-  } catch (e) { alert("❌ Datos incorrectos"); }
+  } catch (e) { alert("❌ Datos incorrectos o error de servidor"); }
 };
 
 const registrarse = async () => {
   try {
     await axios.post('http://localhost:3000/api/auth/registro', reg.value);
-    alert("✅ ¡Cuenta creada! Inicia sesión.");
+    alert("✅ Cuenta creada. Inicia sesión.");
     modoRegistro.value = false;
   } catch (e) { alert("Error al registrar"); }
 };
 
+const salir = () => { 
+    usuario.value = null; 
+    vista.value = 'inicio'; 
+    misReservas.value = [];
+};
+
+// --- ADMIN ---
 const cargarAdmin = async () => {
     try {
         const res = await axios.get('http://localhost:3000/api/admin/reservas');
         reservasAdmin.value = res.data;
-    } catch (e) {}
+    } catch (e) { console.error("Error cargando admin"); }
 };
 
-const salir = () => { usuario.value = null; vista.value = 'inicio'; };
-
-// --- ACCIONES DE ENTRADA ---
+// --- ENTRADAS ---
 const iniciarCompraEntrada = (tarifa) => {
-    if (!usuario.value) return alert("Debes iniciar sesión para comprar entradas.");
+    if (!usuario.value) return alert("Inicia sesión primero.");
     tarifaSeleccionada.value = tarifa;
-    formPagoEntrada.value.monto_transferido = tarifa.valor; 
+    formPagoEntrada.value.monto_transferido = tarifa.valor;
     vista.value = 'pagoentrada';
 };
 
-// 2. Enviar Comprobante (Simulación de POST y envío al panel Admin)
 const enviarComprobante = async () => {
-    if (!usuario.value || !tarifaSeleccionada.value) return alert("Error: No se seleccionó la tarifa.");
-    
-    if (!formPagoEntrada.value.numero_operacion || !formPagoEntrada.value.fecha_transferencia) {
-        return alert("Por favor, completa el número de operación y la fecha.");
-    }
-
-    const qrCode = `CK-PEND-${Date.now().toString().slice(-6)}`;
-    
-    try {
-        // En un sistema real, aquí se enviarían los datos a la BD con estado PENDIENTE_PAGO.
-        // Simulamos la inserción de la venta:
-        await axios.post('http://localhost:3000/api/entradas', {
-            id_cliente: usuario.value.id_cliente, 
-            id_tarifa: tarifaSeleccionada.value.id_tarifa, 
-            valor: tarifaSeleccionada.value.valor,
-        });
-
-        // NUEVO: SIMULACIÓN DE REGISTRO EN PANEL ADMIN
-        ticketsPendientesAdmin.value.push({
-            id_comprobante: Date.now(),
-            cliente: usuario.value.nombre + ' ' + usuario.value.apellido,
-            correo: usuario.value.correo,
-            tarifa: tarifaSeleccionada.value.tiempo,
-            monto: formPagoEntrada.value.monto_transferido,
-            num_operacion: formPagoEntrada.value.numero_operacion,
-            fecha_trans: formPagoEntrada.value.fecha_transferencia,
-            sim_qr: qrCode
-        });
-        
-        alert(`✅ Comprobante Enviado.\n\nTu compra por $${tarifaSeleccionada.value.valor} ha quedado en estado PENDIENTE.\n\nEl administrador de ${datosBancarios.correo_aviso} validará tu transferencia para activar tu QR.\n\nCódigo QR PENDIENTE: [ ${qrCode} ]`);
-        
-        // Limpiar y volver
-        tarifaSeleccionada.value = null;
-        formPagoEntrada.value = { numero_operacion: '', monto_transferido: null, fecha_transferencia: '' };
-        vista.value = 'inicio';
-
-    } catch (e) {
-        alert("❌ Error al procesar el comprobante.");
-    }
+    if (!usuario.value) return alert("Error.");
+    const qrCode = `CK-${Date.now().toString().slice(-6)}`;
+    ticketsPendientesAdmin.value.push({
+        id_comprobante: Date.now(),
+        cliente: usuario.value.nombre + ' ' + usuario.value.apellido,
+        correo: usuario.value.correo,
+        tarifa: tarifaSeleccionada.value.tiempo,
+        monto: formPagoEntrada.value.monto_transferido,
+        num_operacion: formPagoEntrada.value.numero_operacion,
+        fecha_trans: formPagoEntrada.value.fecha_transferencia,
+        sim_qr: qrCode
+    });
+    alert(`✅ Comprobante enviado. Estado: Pendiente.`);
+    vista.value = 'inicio';
 };
 
+// --- CUMPLES ---
 const reservarCumple = async () => {
   if (!usuario.value) return alert("Inicia sesión");
   const menu = menus.value.find(m => m.id_menu === formReserva.value.id_menu);
-  if (!menu) return alert("Selecciona menú");
+  if (!menu) return alert("Selecciona un menú");
+  
   let total = menu.precio_por_nino * formReserva.value.ninos;
+  // Sumar extras si los hay
+  if (formReserva.value.extrasSeleccionados.length > 0) {
+      formReserva.value.extrasSeleccionados.forEach(nombreExtra => {
+          const extra = extrasList.value.find(e => e.nombre === nombreExtra);
+          if (extra) total += extra.precio;
+      });
+  }
+  
   try {
     await axios.post('http://localhost:3000/api/reservas', {
-        id_cliente: usuario.value.id_cliente, ...formReserva.value, extras: formReserva.value.extrasSeleccionados, total
+        id_cliente: usuario.value.id_cliente, 
+        ...formReserva.value, 
+        extras: formReserva.value.extrasSeleccionados, 
+        total
     });
     
-    const qrcode = `RSV-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 100)}`;
-    codigoQRReserva.value = qrcode; 
-    vista.value = 'confirmacion'; 
-    
-  } catch (e) { alert("Error reserva"); }
+    codigoQRReserva.value = `RSV-${Date.now().toString().slice(-6)}`;
+    await cargarMisReservas(usuario.value.id_cliente);
+    vista.value = 'confirmacion';
+    // Limpiar formulario
+    formReserva.value = { fecha: '', bloque: '', ninos: 10, id_menu: null, tematica: '', extrasSeleccionados: [] };
+  } catch (e) { alert("Error al crear reserva en servidor."); }
 };
 
-// --- FUNCIONES ADMINISTRATIVAS ---
-
-// Confirmar Reserva de Cumpleaños
+// --- ACCIONES ADMIN ---
 const confirmarReserva = async (id_reserva) => {
-    if (!confirm(`¿Estás seguro de CONFIRMAR la reserva N° ${id_reserva}? Esto actualizará su estado a 'Confirmado'.`)) {
-        return;
-    }
+    if (!confirm(`¿Confirmar reserva ID ${id_reserva}?`)) return;
     try {
         await axios.put(`http://localhost:3000/api/admin/reservas/confirmar/${id_reserva}`);
-        alert(`✅ Reserva N° ${id_reserva} activada y confirmada.`);
-        cargarAdmin(); // Recarga la tabla
-    } catch (e) {
-        alert("❌ Error al activar la reserva. Intenta de nuevo.");
-    }
+        alert("✅ Reserva Confirmada");
+        cargarAdmin(); 
+    } catch (e) { alert("Error al conectar con servidor"); }
 };
 
-// NUEVO: Eliminar Reserva de Cumpleaños
 const eliminarReserva = async (id_reserva) => {
-    if (!confirm(`⚠️ ¿Estás seguro de ELIMINAR la reserva N° ${id_reserva}?\nEsta acción es irreversible.`)) {
-        return;
-    }
+    if (!confirm(`¿Eliminar reserva ID ${id_reserva}?`)) return;
     try {
-        // En un sistema real, aquí se llamaría a la ruta DELETE
-        // Simulación: Eliminación de la lista local
+        await axios.delete(`http://localhost:3000/api/admin/reservas/${id_reserva}`);
+        alert("🗑️ Reserva Eliminada");
         reservasAdmin.value = reservasAdmin.value.filter(r => r.id_reserva !== id_reserva);
-        alert(`🗑️ Reserva N° ${id_reserva} eliminada correctamente.`);
-        cargarAdmin(); // Recarga (para sincronizar con el backend si fuera necesario)
-    } catch (e) {
-        alert("❌ Error al intentar eliminar la reserva.");
-    }
+    } catch (e) { alert("Error al eliminar"); }
 };
 
-
-// NUEVO: Confirmar Comprobante de Entrada
-const confirmarEntrada = (comprobanteId, sim_qr, clienteCorreo) => {
-    if (!confirm(`¿Confirmar pago y ACTIVAR QR para el cliente con ID N° ${comprobanteId}?`)) {
-        return;
-    }
-    // Lógica para enviar el QR al cliente (simulación)
-    alert(`✅ ¡QR Activado!\nQR: ${sim_qr}\n\nNotificación enviada a ${clienteCorreo}.`);
-    
-    // Eliminar de la lista pendiente
-    ticketsPendientesAdmin.value = ticketsPendientesAdmin.value.filter(t => t.id_comprobante !== comprobanteId);
+const confirmarEntrada = (id) => {
+    if (!confirm("¿Activar QR?")) return;
+    alert("✅ QR Activado");
+    ticketsPendientesAdmin.value = ticketsPendientesAdmin.value.filter(t => t.id_comprobante !== id);
 };
 
+// --- HELPERS (Mejoras visuales) ---
+const isUnlimited = (n) => n && n.toLowerCase().includes('ilimitado');
+const getTicketDescription = (n) => {
+    if (!n) return '';
+    if (n.toLowerCase().includes('ilimitado')) return 'Acceso diario completo.';
+    return 'Tiempo de juego asignado.';
+};
+const formatoPesos = (valor) => {
+    return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(valor);
+}
+const generarCodigoReserva = (id) => {
+    return `CK-RES-${id.toString().padStart(4, '0')}`;
+}
 
 onMounted(cargarDatos);
 </script>
@@ -224,7 +200,8 @@ onMounted(cargarDatos);
       <div class="nav-links">
         <a @click="vista='inicio'" :class="{active: vista=='inicio'}">Inicio</a>
         <a @click="vista='entradas'" :class="{active: vista=='entradas'}">Entradas</a>
-        <a @click="vista='cumples'" :class="{active: vista=='cumples'}">Cumpleaños</a>
+        <a @click="vista='infoCumples'" :class="{active: vista=='infoCumples'}">Info Cumples</a>
+        <a @click="vista='cumples'" :class="{active: vista=='cumples'}">Reserva Cumple</a>
         <a v-if="usuario && !esAdmin" @click="vista='misreservas'" :class="{active: vista=='misreservas'}">Mis Reservas</a>
         <a v-if="esAdmin" @click="vista='admin'" class="admin-tag">Admin</a>
       </div>
@@ -237,17 +214,10 @@ onMounted(cargarDatos);
     <main v-if="vista === 'inicio'">
       <header class="hero-section">
         <div class="hero-bg"></div>
-        <div class="hero-overlay"></div>
         <div class="hero-content">
-          <div class="hero-text">
-            <h1>Diversión sin límites en <span class="highlight">Chillán</span></h1>
-            <p>1000m² de camas elásticas, toboganes y aventuras.</p>
-          </div>
+          <div class="hero-spacer"></div>
           <div v-if="!usuario" class="hero-login-card">
-            <div class="login-header">
-              <h3>{{ modoRegistro ? 'Registro' : 'Bienvenido' }}</h3>
-              <p>{{ modoRegistro ? 'Crea tu cuenta' : 'Ingresa para reservar' }}</p>
-            </div>
+            <div class="login-header"><h3>{{ modoRegistro ? 'Registro' : 'Bienvenido' }}</h3><p>{{ modoRegistro ? 'Crea tu cuenta' : 'Ingresa para reservar' }}</p></div>
             <div class="login-body">
               <div v-if="!modoRegistro">
                 <input v-model="cred.correo" placeholder="Correo">
@@ -256,10 +226,7 @@ onMounted(cargarDatos);
                 <p class="switch" @click="modoRegistro=true">¿No tienes cuenta? <b>Regístrate</b></p>
               </div>
               <div v-else>
-                <div class="row-inputs">
-                   <input v-model="reg.nombre" placeholder="Nombre">
-                   <input v-model="reg.apellido" placeholder="Apellido">
-                </div>
+                <div class="row-inputs"><input v-model="reg.nombre" placeholder="Nombre"><input v-model="reg.apellido" placeholder="Apellido"></div>
                 <input v-model="reg.correo" placeholder="Correo">
                 <input v-model="reg.contraseña" type="password" placeholder="Contraseña">
                 <button @click="registrarse" class="btn-cta">Crear Cuenta</button>
@@ -269,175 +236,130 @@ onMounted(cargarDatos);
           </div>
         </div>
       </header>
-
-      <section class="features-section">
-        <div class="feature-card"><h3>🎂 Cumpleaños</h3><p>Todo incluido.</p></div>
-        <div class="feature-card"><h3>🎟️ Entradas</h3><p>Compra online.</p></div>
-        <div class="feature-card"><h3>📍 Ubicación</h3><p>Parque Urbano.</p></div>
-      </section>
-
-      <section class="gallery-section">
-        <h2>Vive la Experiencia</h2>
-        <div class="gallery-grid">
-          <div class="g-item large" style="background-image: url('/juegos.jpg');"><span>Trampolines</span></div>
-          <div class="g-item" style="background-image: url('/cumple.jpg');"><span>Celebraciones</span></div>
-          <div class="g-item" style="background-image: url('/banner.jpg');"><span>Toboganes</span></div>
+      <section class="precios-hero-section"><div class="precios-bg"></div></section>
+      <section class="location-section"><div class="location-card-wide"><h3>📍 Ubicación</h3><p>Camino las mariposas nº 4009, Strip Center Parque Urbano.</p></div></section>
+      <section class="gallery-section"><h2>Vive la Experiencia</h2><div class="gallery-grid"><div class="g-item" style="background-image: url('/trampolines.jpg');"><span>Trampolines</span></div><div class="g-item" style="background-image: url('/toboganes.jpg');"><span>Toboganes</span></div><div class="g-item" style="background-image: url('/laberinto.jpg');"><span>Laberinto</span></div><div class="g-item" style="background-image: url('/zonadebebes.jpg');"><span>Zona de Bebés</span></div><div class="g-item" style="background-image: url('/cafeteria.jpg');"><span>Cafetería</span></div><div class="g-item" style="background-image: url('/zonadecumpleaños.jpg');"><span>Zona de Cumpleaños</span></div></div></section>
+      <footer class="modern-footer">
+        <div class="footer-content">
+            <div class="footer-col"><h3>🎈 ClubKids</h3><p>El mejor lugar para celebrar y jugar en Chillán.</p><div class="footer-address"><span>📍</span> Camino las mariposas nº 4009,<br>Strip Center Parque Urbano.</div></div>
+            <div class="footer-col"><h3>⏰ Horarios de Atención</h3><ul class="footer-schedule"><li><span class="day">Lunes y Martes:</span> <span class="closed-tag">CERRADO</span></li><li><span class="day">Miércoles y Jueves:</span> 14:30 a 21:00 hrs</li><li><span class="day">Viernes a Domingo:</span> 12:00 a 21:00 hrs</li></ul></div>
+            <div class="footer-col"><h3>📱 Contáctanos</h3><div class="social-links"><a href="#" class="social-item"><span>📸</span> @clubkidschillan</a><a href="#" class="social-item"><span>📘</span> ClubKids Chillán</a><a href="#" class="social-item"><span>📧</span> clubkidschillan@gmail.com</a><a href="#" class="social-item phone"><span>📞</span> +569 33 89 30 26</a></div></div>
         </div>
-      </section>
+        <div class="footer-bottom"><p>© 2024 ClubKids Chillán. Todos los derechos reservados.</p></div>
+      </footer>
+    </main>
 
-      <section class="info-footer">
-        <div class="info-col"><h4>Horarios</h4><p>Mié-Jue: 14:30-21:00</p><p>Finde: 12:00-21:00</p></div>
-        <div class="info-col"><h4>Contacto</h4><p>+569 33 89 30 26</p></div>
-      </section>
+    <main v-if="vista === 'infoCumples'" class="info-cumples-layout">
+      <div class="info-container">
+        <h2>Todo sobre nuestros Cumpleaños</h2>
+        <div class="info-slides-gallery"><div v-for="n in 10" :key="n" class="slide-item"><img :src="`/Informativo Cumpleaños${n}.jpeg`" :alt="'Info ' + n"></div></div>
+        <button @click="vista='cumples'" class="btn-cta-large mt-4">¡Quiero Agendar mi Fiesta!</button>
+      </div>
     </main>
 
     <main v-if="vista === 'entradas'" class="entradas-bg-container">
       <div class="tickets-grid-pop">
         <div v-for="(t, index) in tarifas" :key="t.id_tarifa" class="ticket-pop-card" :class="'pop-style-' + (index % 4)">
-          <span class="deco-star">✨</span>
-          <h3>{{ t.tiempo }}</h3><div class="pop-price">${{ t.valor }}</div>
+          <span class="deco-star">✨</span><h3>{{ t.tiempo }}</h3><div class="pop-price">{{ formatoPesos(t.valor) }}</div>
+          <div class="ticket-details"><p class="time-desc">{{ getTicketDescription(t.tiempo) }}</p><ul class="inclusions-list"><li>Acceso a Trampolines y Toboganes.</li><li>Acceso a Laberinto y Zona de Bebés.</li><li>Acceso a Cafetería.</li><li v-if="isUnlimited(t.tiempo)" class="special-inclusion"><strong>Entrada y salida libre durante todo el día.</strong></li></ul></div>
           <button @click="iniciarCompraEntrada(t)" class="btn-pop">Comprar</button>
-          <span class="deco-rocket">🚀</span>
         </div>
       </div>
     </main>
 
     <main v-if="vista === 'pagoentrada'" class="pago-layout">
         <div class="pago-container">
-            <h2 class="pago-title">Transferencia Bancaria</h2>
-            <p class="pago-subtitle">Completa tu pago de <strong>{{ tarifaSeleccionada.tiempo }} por ${{ tarifaSeleccionada.valor }}</strong> y registra el comprobante para la activación.</p>
-
+            <h2 class="pago-title">Transferencia</h2>
             <div class="pago-content">
-                
                 <div class="banco-card">
-                    <h3 class="banco-header">🏦 Datos de Transferencia</h3>
+                    <h3 class="banco-header">🏦 Datos</h3>
                     <div class="data-group"><span class="data-label">Beneficiario:</span><span class="data-value">{{ datosBancarios.nombre }}</span></div>
                     <div class="data-group"><span class="data-label">RUT:</span><span class="data-value">{{ datosBancarios.rut }}</span></div>
                     <div class="data-group"><span class="data-label">Banco:</span><span class="data-value">{{ datosBancarios.banco }}</span></div>
                     <div class="data-group"><span class="data-label">Cuenta:</span><span class="data-value">{{ datosBancarios.cuenta }}</span></div>
-                    
-                    <div class="monto-final">
-                      Monto a Transferir: <span class="monto-value">${{ tarifaSeleccionada.valor }}</span>
-                    </div>
+                    <div class="monto-final">Monto: <span class="monto-value">{{ formatoPesos(tarifaSeleccionada.valor) }}</span></div>
                 </div>
-
                 <form @submit.prevent="enviarComprobante" class="comprobante-form">
-                    <h3 class="comprobante-header">📄 Registrar Comprobante</h3>
-                    <div class="f-group">
-                        <label>Monto Transferido</label>
-                        <input type="number" v-model="formPagoEntrada.monto_transferido" disabled class="input-disabled">
-                    </div>
-                    <div class="f-group">
-                        <label>N° de Operación / Transferencia</label>
-                        <input type="text" v-model="formPagoEntrada.numero_operacion" placeholder="Ej: 12345678" required>
-                    </div>
-                    <div class="f-group">
-                        <label>Fecha de la Transferencia</label>
-                        <input type="date" v-model="formPagoEntrada.fecha_transferencia" required>
-                    </div>
-                    
-                    <p class="comprobante-info">⚠️ Una vez enviado, el administrador debe validar su pago manualmente. Recibirá su QR en el correo en breve.</p>
-                    
-                    <div class="pago-buttons">
-                        <button type="button" @click="vista='entradas'" class="btn-cancel">Cancelar</button>
-                        <button type="submit" class="btn-pago-confirm">Enviar Comprobante</button>
-                    </div>
+                    <h3 class="comprobante-header">📄 Comprobante</h3>
+                    <div class="f-group"><label>Monto</label><input type="text" :value="formatoPesos(formPagoEntrada.monto_transferido)" disabled class="input-disabled"></div>
+                    <div class="f-group"><label>N° Operación</label><input type="text" v-model="formPagoEntrada.numero_operacion" required></div>
+                    <div class="f-group"><label>Fecha</label><input type="date" v-model="formPagoEntrada.fecha_transferencia" required></div>
+                    <div class="pago-buttons"><button type="button" @click="vista='entradas'" class="btn-cancel">Cancelar</button><button type="submit" class="btn-pago-confirm">Enviar</button></div>
                 </form>
             </div>
         </div>
     </main>
 
     <main v-if="vista === 'cumples'" class="cumples-bg-container">
-      <div class="form-wrapper">
-        <div class="header-party">
-          <h2>🎂 Reserva tu Fiesta Soñada</h2>
-          <p>Personaliza cada detalle y celebra en grande</p>
-        </div>
-        <div v-if="!usuario" class="login-alert-box">
-          <h3>🔒 Acceso Restringido</h3>
-          <p>Por favor inicia sesión para agendar tu evento.</p>
-        </div>
-        <form v-else @submit.prevent="reservarCumple" class="form-party">
+      <div v-if="!usuario" class="no-auth-cumple-hero">
+        <div class="no-auth-content"><h1 class="na-title">Reserva tu Fiesta</h1><div class="na-card"><span class="na-icon">🔒</span><h3>Acceso Restringido</h3><p>Inicia sesión para reservar.</p><button @click="vista='inicio'" class="btn-cta">Ir al Inicio</button></div></div>
+      </div>
+      <div v-else class="form-wrapper">
+        <div class="header-party"><h2>🎂 Reserva tu Fiesta</h2></div>
+        <form @submit.prevent="reservarCumple" class="form-party">
+          <div class="party-section"><h3>📅 Datos</h3><div class="form-grid"><div class="f-group"><label>Fecha</label><input type="date" v-model="formReserva.fecha" required></div><div class="f-group"><label>Bloque</label><select v-model="formReserva.bloque" required><option v-for="b in bloques" :key="b" :value="b">{{ b }}</option></select></div><div class="f-group"><label>Niños</label><input type="number" v-model="formReserva.ninos" min="8" required></div><div class="f-group"><label>Temática</label><input v-model="formReserva.tematica" required></div></div></div>
+          
           <div class="party-section">
-            <h3>📅 Datos del Evento</h3>
-            <div class="form-grid">
-              <div class="f-group"><label>Fecha</label><input type="date" v-model="formReserva.fecha" required></div>
-              <div class="f-group"><label>Bloque Horario</label><select v-model="formReserva.bloque" required><option v-for="b in bloques" :key="b" :value="b">{{ b }}</option></select></div>
-              <div class="f-group"><label>Niños (Mín 8)</label><input type="number" v-model="formReserva.ninos" min="8" required></div>
-              <div class="f-group"><label>Temática</label><input v-model="formReserva.tematica" placeholder="Ej: Mario, Barbie..." required></div>
-            </div>
-          </div>
-          <div class="party-section">
-            <h3>🎁 Elige tu Pack</h3>
+            <h3>🎁 Selecciona tu Pack</h3>
+            <div v-if="menus.length === 0" class="no-data-msg">Cargando menús disponibles...</div>
             <div class="pack-selector-pop">
-              <div v-for="(m, index) in menus" :key="m.id_menu" 
-                   class="pack-card-pop" 
-                   :class="[{active: formReserva.id_menu === m.id_menu}, 'color-' + (index % 3)]"
-                   @click="formReserva.id_menu = m.id_menu">
+              <div v-for="(m, index) in menus" :key="m.id_menu" class="pack-card-pop" :class="[{active: formReserva.id_menu === m.id_menu}, 'color-' + (index % 3)]" @click="formReserva.id_menu = m.id_menu">
                 <div class="check-icon" v-if="formReserva.id_menu === m.id_menu">✔</div>
                 <h4>{{ m.nombre }}</h4>
-                <div class="pack-price-pop">${{ m.precio_por_nino }} <span>/ niño</span></div>
-                <p>{{ m.descripcion }}</p>
+                <div class="pack-price-pop">{{ formatoPesos(m.precio_por_nino) }} <span>/ niño</span></div>
+                <p class="pack-desc-mini">{{ m.descripcion }}</p>
               </div>
             </div>
           </div>
-          <div class="party-section">
-            <h3>✨ Extras y Adicionales</h3>
-            <div class="extras-grid-pop">
-              <label v-for="ex in extrasList" :key="ex.id_extra" 
-                     class="extra-bubble" 
-                     :class="{selected: formReserva.extrasSeleccionados.includes(ex.nombre)}">
-                <input type="checkbox" :value="ex.nombre" v-model="formReserva.extrasSeleccionados" hidden>
-                {{ ex.nombre }} <span class="tag-price">+${{ ex.precio }}</span>
-              </label>
-            </div>
-          </div>
+
+          <div class="party-section"><h3>✨ Extras</h3><div class="extras-grid-pop"><label v-for="ex in extrasList" :key="ex.id_extra" class="extra-bubble" :class="{selected: formReserva.extrasSeleccionados.includes(ex.nombre)}"><input type="checkbox" :value="ex.nombre" v-model="formReserva.extrasSeleccionados" hidden>{{ ex.nombre }} <span class="tag-price">+{{ formatoPesos(ex.precio) }}</span></label></div></div>
           <button class="btn-submit-party">📩 Confirmar Reserva</button>
         </form>
       </div>
     </main>
 
     <main v-if="vista === 'confirmacion'" class="confirmacion-layout">
-        <div class="confirmacion-card">
-            <div class="header-conf">
-                <img src="/logo.png" alt="ClubKids Logo" class="conf-logo">
-                <h1 class="conf-title">¡Reserva de Cumpleaños Confirmada!</h1>
-                <p class="conf-subtitle">Tu solicitud ha sido registrada exitosamente. Hemos enviado los detalles y el comprobante a tu correo electrónico.</p>
-            </div>
-            
-            <div class="conf-body">
-                <div class="conf-qr-box">
-                    <span class="conf-qr-label">TU CÓDIGO DE RESERVA:</span>
-                    <span class="conf-qr-code">{{ codigoQRReserva }}</span>
-                    <p>Guarda este código. Lo necesitarás para el abono y confirmación final.</p>
-                </div>
-                
-                <p class="conf-final-message">
-                    **Próximo Paso:** Nuestro equipo te contactará en las próximas 24 horas para verificar los detalles de tu evento y coordinar el pago de la reserva ($50.000).
-                </p>
-            </div>
-            
-            <button class="btn-primary-lg btn-full" @click="vista='inicio'">Volver al Inicio</button>
-        </div>
+        <div class="confirmacion-card"><div class="header-conf"><h1 class="conf-title">¡Reserva Confirmada!</h1></div><div class="conf-body"><div class="conf-qr-box"><span class="conf-qr-label">CÓDIGO:</span><span class="conf-qr-code">{{ codigoQRReserva }}</span></div></div><button class="btn-primary-lg btn-full" @click="vista='inicio'">Volver</button></div>
     </main>
 
     <main v-if="vista === 'misreservas'" class="historial-layout">
         <div class="historial-container">
-            <h2>📜 Mi Historial de Reservas</h2>
-            <p v-if="!usuario" class="empty-message-user">Inicia sesión para ver tu historial de reservas.</p>
-            <p v-else-if="misReservas.length === 0" class="empty-message">No tienes reservas de cumpleaños registradas aún. ¡Agenda la tuya!</p>
+            <h2>📜 Mis Reservas</h2>
+            
+            <div v-if="misReservas.length === 0" class="empty-state-card">
+                <span class="empty-icon">📅</span>
+                <h3>No tienes reservas activas</h3>
+                <p>¿Qué esperas para celebrar con nosotros?</p>
+                <button @click="vista='cumples'" class="btn-primary-sm mt-3">Reservar Ahora</button>
+            </div>
 
             <div v-else class="reservas-grid">
-                <div v-for="r in misReservas" :key="r.id_reserva" class="reserva-card">
-                    <div class="reserva-header">
-                        <span class="r-status" :class="r.estado">{{ r.estado }}</span>
-                        <h4>🎉 {{ r.fecha_evento.split('T')[0] }} ({{ r.bloque_horario }})</h4>
+                <div v-for="r in misReservas" :key="r.id_reserva" class="reserva-card-modern">
+                    
+                    <div class="card-header-modern">
+                        <span class="status-badge-modern" :class="r.estado">{{ r.estado }}</span>
+                        <span class="date-badge">🗓️ {{ r.fecha_evento.split('T')[0] }}</span>
                     </div>
-                    <div class="reserva-body">
-                        <p><strong>Pack:</strong> {{ r.menu_nombre }}</p>
-                        <p><strong>Temática:</strong> {{ r.tematica }}</p>
-                        <p><strong>Invitados:</strong> {{ r.cantidad_ninos }} niños</p>
-                        <p class="r-total">Total Estimado: <strong>${{ r.total_estimado }}</strong></p>
+
+                    <div class="card-body-modern">
+                        <h3 class="pack-title">{{ r.menu_nombre }}</h3>
+                        <div class="details-grid">
+                            <p><strong>⏰ Bloque:</strong> {{ r.bloque_horario }}</p>
+                            <p><strong>🎨 Temática:</strong> {{ r.tematica }}</p>
+                            <p><strong>👶 Invitados:</strong> {{ r.cantidad_ninos }}</p>
+                            <p v-if="r.extras"><strong>✨ Extras:</strong> {{ r.extras }}</p>
+                        </div>
+                    </div>
+
+                    <div class="card-footer-modern">
+                        <div class="code-box">
+                            <small>CÓDIGO:</small>
+                            <strong>{{ generarCodigoReserva(r.id_reserva) }}</strong>
+                        </div>
+                        <div class="total-box">
+                            <small>Total Estimado</small>
+                            <span class="total-amount">{{ formatoPesos(r.total_estimado) }}</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -446,122 +368,36 @@ onMounted(cargarDatos);
 
     <main v-if="vista === 'admin' && esAdmin" class="admin-layout">
       <div class="admin-container">
-        
-        <div class="admin-header">
-          <div class="ah-text">
-            <h2>🎛️ Panel de Control</h2>
-            <p>Gestión de ClubKids</p>
-          </div>
-          <button @click="cargarAdmin" class="btn-refresh">🔄 Actualizar</button>
-        </div>
-
-        <h3 class="admin-section-title">🎂 1. Reservas de Cumpleaños</h3>
+        <div class="admin-header"><h2>Panel Admin</h2><button @click="cargarAdmin">🔄</button></div>
+        <h3 class="admin-section-title">Reservas</h3>
         <div class="table-wrapper mb-4">
           <table class="modern-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Fecha / Hora</th>
-                <th>Cliente</th>
-                <th>Evento / Temática</th>
-                <th>Total</th>
-                <th>Estado</th>
-                <th>Acción</th> </tr>
-            </thead>
+            <thead><tr><th>ID</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th><th>Acción</th></tr></thead>
             <tbody>
               <tr v-for="r in reservasAdmin" :key="r.id_reserva">
-                <td>{{ r.id_reserva }}</td>
-                <td>
-                  <div class="td-date">
-                    <span class="d-day">{{ r.fecha_evento.split('T')[0] }}</span>
-                    <span class="d-time">{{ r.bloque_horario }}</span>
-                  </div>
-                </td>
-                <td>
-                  <div class="td-user">
-                    <strong>{{ r.cliente }}</strong>
-                    <small>{{ r.correo }}</small>
-                  </div>
-                </td>
-                <td>
-                  <div class="td-event">
-                    <span class="badge-pack">{{ r.menu }}</span>
-                    <small>Tema: {{ r.tematica }} ({{ r.cantidad_ninos }} niños)</small>
-                  </div>
-                </td>
-                <td class="text-price">${{ r.total_estimado }}</td>
-                <td>
-                    <span class="r-status" :class="r.estado">{{ r.estado }}</span>
-                </td>
+                <td>{{ r.id_reserva }}</td><td>{{ r.fecha_evento.split('T')[0] }}</td><td>{{ r.cliente }}</td><td>{{ formatoPesos(r.total_estimado) }}</td>
+                <td><span class="r-status" :class="r.estado">{{ r.estado }}</span></td>
                 <td class="admin-actions">
-                    <button 
-                        v-if="r.estado === 'Pendiente'" 
-                        @click="confirmarReserva(r.id_reserva)" 
-                        class="btn-confirm-admin btn-sm">
-                        Activar
-                    </button>
-                    <span v-else class="text-success">✅ Activo</span>
-                    
-                    <button @click="eliminarReserva(r.id_reserva)" class="btn-delete-admin btn-sm">
-                        ✕ Eliminar
-                    </button>
+                    <button v-if="r.estado === 'Pendiente'" @click="confirmarReserva(r.id_reserva)" class="btn-confirm-admin btn-sm">Activar</button>
+                    <button @click="eliminarReserva(r.id_reserva)" class="btn-delete-admin btn-sm">✕</button>
                 </td>
-              </tr>
-              <tr v-if="reservasAdmin.length === 0">
-                <td colspan="7" class="empty-row">No hay reservas registradas aún.</td>
               </tr>
             </tbody>
           </table>
         </div>
-        
         <hr>
-
-        <h3 class="admin-section-title mt-4">🎟️ 2. Comprobantes de Entrada Pendientes</h3>
+        <h3 class="admin-section-title mt-4">Entradas Pendientes</h3>
         <div class="table-wrapper">
             <table class="modern-table">
-                <thead>
-                    <tr>
-                        <th>ID Pago</th>
-                        <th>Cliente</th>
-                        <th>Tarifa</th>
-                        <th>Monto</th>
-                        <th>Operación / Fecha Transf.</th>
-                        <th>Acción</th>
-                    </tr>
-                </thead>
+                <thead><tr><th>Cliente</th><th>Monto</th><th>N° Op</th><th>Acción</th></tr></thead>
                 <tbody>
                     <tr v-for="t in ticketsPendientesAdmin" :key="t.id_comprobante">
-                        <td>{{ t.id_comprobante.toString().slice(-4) }}</td>
-                        <td>
-                            <div class="td-user">
-                                <strong>{{ t.cliente }}</strong>
-                                <small>{{ t.correo }}</small>
-                            </div>
-                        </td>
-                        <td>{{ t.tarifa }}</td>
-                        <td class="text-price">${{ t.monto }}</td>
-                        <td>
-                            <div class="td-date">
-                                <strong>N° Op: {{ t.num_operacion }}</strong>
-                                <small>Fecha: {{ t.fecha_trans }}</small>
-                            </div>
-                        </td>
-                        <td class="admin-actions">
-                            <button 
-                                @click="confirmarEntrada(t.id_comprobante, t.sim_qr, t.correo)" 
-                                class="btn-confirm-admin btn-sm">
-                                Activar QR
-                            </button>
-                        </td>
-                    </tr>
-                    <tr v-if="ticketsPendientesAdmin.length === 0">
-                        <td colspan="6" class="empty-row-info">No hay comprobantes de entrada pendientes.</td>
+                        <td>{{ t.cliente }}</td><td>{{ formatoPesos(t.monto) }}</td><td>{{ t.num_operacion }}</td>
+                        <td class="admin-actions"><button @click="confirmarEntrada(t.id_comprobante, t.sim_qr, t.correo)" class="btn-confirm-admin btn-sm">Activar</button></td>
                     </tr>
                 </tbody>
             </table>
         </div>
-
-
       </div>
     </main>
 
@@ -569,295 +405,197 @@ onMounted(cargarDatos);
 </template>
 
 <style>
-/* FUENTE Y GENERAL */
+/* GENERAL */
 body { font-family: 'Segoe UI', sans-serif; background: #f3f4f6; margin: 0; color: #1f2937; }
-.app-container { min-height: 100vh; display: flex; flex-direction: column; }
+.app-container { min-height: 100vh; display: flex; flex-direction: column; padding-top: 80px; }
+.mt-3 { margin-top: 1rem; } .mt-4 { margin-top: 1.5rem; }
 
 /* NAVBAR */
-.navbar { display: flex; justify-content: space-between; align-items: center; padding: 15px 5%; background: white; position: sticky; top: 0; z-index: 1000; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+.navbar { display: flex; justify-content: space-between; align-items: center; padding: 15px 5%; background: white; position: fixed; width: 100%; top: 0; left: 0; z-index: 1000; box-shadow: 0 4px 10px rgba(0,0,0,0.05); height: 80px; box-sizing: border-box; }
 .brand-logo { height: 50px; width: auto; }
-.nav-links a { margin: 0 15px; cursor: pointer; color: #4b5563; font-weight: 600; }
+.nav-links a { margin: 0 15px; cursor: pointer; color: #4b5563; font-weight: 600; text-decoration: none; }
 .nav-links a.active { color: #ef4444; border-bottom: 2px solid #ef4444; }
 .admin-tag { background: #fcd34d; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; }
-.btn-primary-sm { background: #ef4444; color: white; border: none; padding: 8px 20px; border-radius: 50px; font-weight: bold; cursor: pointer; }
+.btn-primary-sm { background: #ef4444; color: white; border: none; padding: 8px 20px; border-radius: 50px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+.btn-primary-sm:hover { background: #d32f2f; }
 
-/* HERO */
-.hero-section { position: relative; height: 500px; display: flex; align-items: center; justify-content: center; background-color: #333; }
-.hero-bg { position: absolute; width: 100%; height: 100%; background-image: url('/banner.jpg'); background-size: cover; background-position: center; opacity: 0.6; }
-.hero-content { position: relative; z-index: 10; display: flex; width: 90%; max-width: 1100px; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 40px; }
-.hero-text { flex: 1; color: white; min-width: 300px; text-shadow: 0 2px 5px rgba(0,0,0,0.7); }
-.hero-text h1 { font-size: 3rem; margin-bottom: 20px; font-weight: 800; }
-.highlight { color: #fcd34d; }
+/* HERO - LOGIN */
+.hero-section { position: relative; height: calc(100vh - 80px); display: flex; align-items: center; justify-content: flex-end; background-color: #333; padding-right: 10%; margin-top: 0; padding-top: 0; }
+.hero-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-image: url('/banner.jpg'); background-size: cover; background-position: center; z-index: 0; }
+.hero-overlay { display: none; } 
+.hero-content { position: relative; z-index: 10; display: flex; width: 100%; justify-content: flex-end; }
 .hero-login-card { background: white; width: 320px; border-radius: 15px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
-input, select { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-family: inherit; }
+.login-header h3 { margin: 0; color: #333; }
+.login-header p { margin: 5px 0 15px 0; color: #666; font-size: 0.9rem; }
+.login-body input { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
 .row-inputs { display: flex; gap: 5px; }
 .btn-cta { width: 100%; background: #ef4444; color: white; padding: 10px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; }
 .switch { text-align: center; font-size: 0.8rem; margin-top: 10px; cursor: pointer; }
-.features-section { display: flex; justify-content: center; gap: 20px; padding: 40px 5%; margin-top: -30px; position: relative; z-index: 20; flex-wrap: wrap; }
-.feature-card { background: white; padding: 20px; border-radius: 15px; width: 200px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); text-align: center; }
+
+/* PRECIOS & UBICACION & GALERIA */
+.precios-hero-section { position: relative; width: 100%; height: calc(100vh - 80px); overflow: hidden; background-color: #222; }
+.precios-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-image: url('/precios.jpg'); background-size: cover; background-position: center; }
+.location-section { display: flex; justify-content: center; padding: 40px 5%; background-color: #f3f4f6; }
+.location-card-wide { background: white; padding: 30px 50px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); text-align: center; border-left: 5px solid #ef4444; font-size: 1.2rem; color: #333; max-width: 800px; width: 100%; }
 .gallery-section { padding: 40px 5%; text-align: center; }
-.gallery-grid { display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 200px 200px; gap: 15px; max-width: 900px; margin: 20px auto; }
-.g-item { border-radius: 15px; background-size: cover; background-position: center; position: relative; background-color: #555; }
-.g-item.large { grid-row: span 2; }
-.g-item span { position: absolute; bottom: 10px; left: 10px; background: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 0.8rem; }
-.info-footer { background: #1f2937; color: white; padding: 40px 5%; display: flex; justify-content: space-around; }
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); grid-auto-rows: 250px; gap: 20px; max-width: 1200px; margin: 30px auto; }
+.g-item { border-radius: 15px; background-size: cover; background-position: center; position: relative; background-color: #ddd; overflow: hidden; transition: transform 0.3s; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+.g-item:hover { transform: scale(1.03); }
+.g-item span { position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.6); color: white; padding: 15px; font-weight: bold; font-size: 1.1rem; text-align: center; box-sizing: border-box; }
 
-/* ENTRADAS */
-.entradas-bg-container { background-image: url('/fondo-entradas.jpg'); background-size: cover; background-position: center; min-height: 80vh; display: flex; align-items: center; justify-content: center; padding: 40px 20px; background-color: #2c3e50; }
-.tickets-grid-pop { display: flex; justify-content: center; gap: 25px; flex-wrap: wrap; }
-.ticket-pop-card { border-radius: 25px; padding: 30px 25px; width: 220px; text-align: center; color: white; box-shadow: 0 10px 25px rgba(0,0,0,0.2); position: relative; overflow: hidden; transition: transform 0.3s; }
+/* FOOTER */
+.modern-footer { background-color: #2c3e50; color: #ecf0f1; padding: 50px 5% 20px; }
+.footer-content { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 40px; max-width: 1200px; margin: 0 auto; }
+.footer-col h3 { color: #f1c40f; margin-bottom: 20px; font-size: 1.3rem; border-bottom: 2px solid #e74c3c; padding-bottom: 10px; display: inline-block; }
+.footer-col p { color: #bdc3c7; line-height: 1.6; }
+.footer-address { margin-top: 15px; color: #ecf0f1; font-weight: 500; }
+.footer-schedule { list-style: none; padding: 0; }
+.footer-schedule li { margin-bottom: 10px; border-bottom: 1px dashed #34495e; padding-bottom: 5px; display: flex; justify-content: space-between; }
+.closed-tag { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+.social-links { display: flex; flex-direction: column; gap: 12px; }
+.social-item { text-decoration: none; color: #ecf0f1; display: flex; align-items: center; gap: 10px; transition: 0.3s; }
+.social-item:hover { color: #f1c40f; transform: translateX(5px); }
+.social-item span { font-size: 1.2rem; }
+.footer-bottom { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #34495e; font-size: 0.9rem; color: #7f8c8d; }
+
+/* INFO CUMPLES */
+.info-cumples-layout { padding: 40px 20px; background-color: #f8f9fa; min-height: 80vh; display: flex; justify-content: center; }
+.info-container { max-width: 900px; width: 100%; text-align: center; }
+.info-container h2 { color: #2c3e50; margin-bottom: 10px; font-size: 2.5rem; }
+.info-intro { color: #666; margin-bottom: 30px; font-size: 1.1rem; }
+.info-slides-gallery { display: flex; flex-direction: column; gap: 25px; margin-bottom: 30px; }
+.slide-item img { width: 100%; height: auto; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); display: block; }
+.btn-cta-large { background: #ef4444; color: white; border: none; padding: 15px 40px; border-radius: 50px; font-weight: bold; font-size: 1.2rem; cursor: pointer; transition: background 0.3s, transform 0.2s; box-shadow: 0 5px 15px rgba(239, 68, 68, 0.4); }
+.btn-cta-large:hover { background: #d32f2f; transform: translateY(-3px); }
+
+/* ENTRADAS & CUMPLES FORM */
+.entradas-bg-container { background-image: url('/fondo-entradas.jpg'); background-size: cover; background-position: center; min-height: 80vh; padding: 40px 20px; display: flex; justify-content: center; }
+.tickets-grid-pop { display: flex; justify-content: center; gap: 25px; flex-wrap: wrap; align-items: flex-start; }
+.ticket-pop-card { border-radius: 25px; padding: 30px 25px; width: 260px; text-align: center; background: white; box-shadow: 0 10px 25px rgba(0,0,0,0.2); position: relative; transition: transform 0.3s; display: flex; flex-direction: column; }
 .ticket-pop-card:hover { transform: translateY(-10px) scale(1.02); }
-.ticket-pop-card h3 { font-size: 1.8rem; margin-bottom: 10px; font-weight: 800; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-.pop-price { font-size: 2.5rem; font-weight: 900; margin: 15px 0; text-shadow: 0 2px 4px rgba(0,0,0,0.2); color: #fff700; }
-.btn-pop { background: #1a1a1a; color: white; border: none; padding: 12px 30px; border-radius: 50px; font-weight: bold; cursor: pointer; box-shadow: 0 5px 15px rgba(0,0,0,0.3); transition: 0.2s; }
-.btn-pop:hover { background: #000; transform: scale(1.05); }
-.pop-style-0 { background: linear-gradient(135deg, #00c6ff, #0072ff); }
-.pop-style-1 { background: linear-gradient(135deg, #ff416c, #ff4b2b); }
-.pop-style-2 { background: linear-gradient(135deg, #a855f7, #6366f1); }
-.pop-style-3 { background: linear-gradient(135deg, #ff9966, #ff5e62); }
-.deco-star { position: absolute; top: 10px; left: 15px; font-size: 1.5rem; opacity: 0.5; }
-.deco-rocket { position: absolute; bottom: 10px; right: 15px; font-size: 1.5rem; opacity: 0.5; transform: rotate(-45deg); }
+.pop-price { font-size: 2.5rem; font-weight: 900; margin: 10px 0; color: #fff700; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+.ticket-details { text-align: left; margin: 15px 0 25px 0; color: rgba(255,255,255,0.95); font-size: 0.95rem; flex-grow: 1; }
+.inclusions-list { list-style: none; padding: 0; margin: 0; }
+.inclusions-list li { margin-bottom: 8px; padding-left: 25px; position: relative; line-height: 1.4; }
+.inclusions-list li::before { content: '✓'; position: absolute; left: 0; top: 0; font-weight: bold; color: #bfff00; }
+.btn-pop { background: #1a1a1a; color: white; border: none; padding: 12px 30px; border-radius: 50px; font-weight: bold; cursor: pointer; width: 100%; }
+.pop-style-0 { background: linear-gradient(135deg, #00c6ff, #0072ff); color: white; }
+.pop-style-1 { background: linear-gradient(135deg, #ff416c, #ff4b2b); color: white; }
+.pop-style-2 { background: linear-gradient(135deg, #a855f7, #6366f1); color: white; }
+.pop-style-3 { background: linear-gradient(135deg, #ff9966, #ff5e62); color: white; }
+.cumples-bg-container { background-image: url('/fondo-cumple.jpg'); background-size: cover; background-position: center; min-height: 80vh; padding: 40px 20px; display: flex; justify-content: center; align-items: center; }
+.no-auth-cumple-hero { width: 100%; max-width: 600px; text-align: center; color: white; }
+.no-auth-content { background: rgba(0, 0, 0, 0.6); padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+.na-title { font-size: 3rem; margin-bottom: 10px; font-weight: 800; text-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+.na-card { background: white; padding: 30px; border-radius: 15px; color: #333; max-width: 400px; margin: 0 auto; }
+.form-wrapper { width: 100%; max-width: 800px; }
+.form-party { background: white; padding: 40px; border-radius: 25px; }
+.party-section { margin-bottom: 30px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
+.pack-selector-pop { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
+/* PACK CARDS MEJORADAS */
+.pack-card-pop { border: 3px solid transparent; border-radius: 15px; padding: 25px; cursor: pointer; text-align: center; position: relative; color: white; transition: 0.3s; }
+.pack-card-pop:hover { transform: translateY(-5px); box-shadow: 0 8px 20px rgba(0,0,0,0.2); }
+.pack-card-pop.active { border-color: white; transform: scale(1.05); box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 2; }
+.pack-desc-mini { font-size: 0.85rem; margin-top: 5px; opacity: 0.9; }
+.color-0 { background: linear-gradient(135deg, #48dbfb, #0abde3); } .color-1 { background: linear-gradient(135deg, #ff9f43, #ee5253); } .color-2 { background: linear-gradient(135deg, #ff6b6b, #c0392b); }
+.extras-grid-pop { display: flex; flex-wrap: wrap; gap: 10px; }
+.extra-bubble { background: #f1f2f6; padding: 10px 20px; border-radius: 50px; cursor: pointer; }
+.extra-bubble.selected { background: #5f27cd; color: white; }
+.btn-submit-party { width: 100%; background: #ff4757; color: white; padding: 18px; border: none; border-radius: 15px; font-weight: bold; cursor: pointer; }
 
-/* VISTA PAGO ENTRADA */
+/* PAGO */
 .pago-layout { display: flex; justify-content: center; padding: 40px 20px; min-height: 80vh; background-color: #f8f9fa; }
 .pago-container { max-width: 800px; width: 100%; }
-.pago-title { color: #2c3e50; font-size: 2rem; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
-.pago-subtitle { color: #7f8c8d; font-size: 1.1rem; margin-bottom: 30px; }
+.pago-title { font-size: 2rem; border-bottom: 2px solid #eee; margin-bottom: 15px; }
 .pago-content { display: flex; gap: 30px; flex-wrap: wrap; }
-.banco-card { flex: 1; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); min-width: 300px; border-left: 4px solid #3498db; }
-.banco-header { color: #3498db; margin-top: 0; border-bottom: 1px dashed #3498db; padding-bottom: 10px; }
-.data-group { display: flex; justify-content: space-between; margin: 8px 0; font-size: 0.95rem; }
-.data-label { font-weight: 600; color: #576574; }
-.data-value { color: #34495e; }
-.monto-final { background: #e8f5e9; padding: 10px; border-radius: 8px; margin-top: 15px !important; font-size: 1rem !important; color: #27ae60 !important; font-weight: bold; }
-.monto-value { color: #1a1a1a; font-size: 1.2rem; }
-.comprobante-form { flex: 1; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); min-width: 300px; }
-.comprobante-header { color: #ef4444; margin-top: 0; border-bottom: 1px dashed #fce4ec; padding-bottom: 10px; }
-.comprobante-info { font-size: 0.8rem; color: #e67e22; margin-bottom: 20px; }
-.pago-buttons { display: flex; justify-content: space-between; gap: 10px; margin-top: 20px; }
-.btn-cancel { background: #95a5a6; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; flex: 1; }
-.btn-pago-confirm { background: #ef4444; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; flex: 1.5; }
+.banco-card { flex: 1; background: white; padding: 25px; border-radius: 15px; min-width: 300px; border-left: 4px solid #3498db; }
+.banco-header { color: #3498db; border-bottom: 1px dashed #3498db; padding-bottom: 10px; }
+.data-group { display: flex; justify-content: space-between; margin: 8px 0; }
+.monto-final { background: #e8f5e9; padding: 10px; border-radius: 8px; margin-top: 15px; font-weight: bold; color: #27ae60; }
+.comprobante-form { flex: 1; background: white; padding: 25px; border-radius: 15px; min-width: 300px; }
+.comprobante-header { color: #ef4444; border-bottom: 1px dashed #fce4ec; padding-bottom: 10px; }
+.pago-buttons { display: flex; gap: 10px; margin-top: 20px; }
+.btn-cancel { flex: 1; background: #95a5a6; color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; }
+.btn-pago-confirm { flex: 1.5; background: #ef4444; color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold; }
 
+/* CONFIRMACION */
+.confirmacion-layout { min-height: 80vh; display: flex; justify-content: center; align-items: center; }
+.confirmacion-card { background: white; padding: 50px; border-radius: 25px; text-align: center; border: 4px solid #2ecc71; max-width: 600px; }
+.conf-qr-box { background: #e9f7ef; padding: 30px; border-radius: 15px; margin: 30px 0; border: 1px solid #c8e6c9; }
+.conf-qr-code { font-size: 2rem; font-weight: bold; display: block; margin-top: 10px; }
+.btn-primary-lg { background: #ef4444; color: white; border: none; padding: 15px 30px; border-radius: 10px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 30px; }
 
-/* CUMPLES */
-.cumples-bg-container { background-image: url('/fondo-cumple.jpg'); background-size: cover; background-position: center; min-height: 90vh; padding: 40px 20px; display: flex; justify-content: center; align-items: flex-start; background-color: #ff9f43; }
-.form-wrapper { width: 100%; max-width: 800px; }
-.header-party { text-align: center; color: white; margin-bottom: 30px; text-shadow: 0 2px 5px rgba(0,0,0,0.3); }
-.header-party h2 { font-size: 2.5rem; margin-bottom: 5px; }
-.form-party { background: white; padding: 40px; border-radius: 25px; box-shadow: 0 15px 40px rgba(0,0,0,0.2); }
-.party-section { margin-bottom: 30px; }
-.party-section h3 { color: #576574; border-bottom: 2px solid #f1f2f6; padding-bottom: 10px; margin-bottom: 15px; }
-.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
-.f-group label { display: block; font-weight: 600; color: #576574; margin-bottom: 5px; }
-.pack-selector-pop { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
-.pack-card-pop { border: 2px solid transparent; border-radius: 15px; padding: 20px; cursor: pointer; text-align: center; position: relative; transition: 0.2s; color: white; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-.pack-card-pop:hover { transform: translateY(-5px); }
-.pack-card-pop.active { border: 4px solid white; transform: scale(1.02); box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
-.color-0 { background: #48dbfb; } .color-1 { background: #ff9f43; } .color-2 { background: #ff6b6b; }
-.pack-price-pop { font-size: 1.5rem; font-weight: bold; margin: 10px 0; }
-.pack-price-pop span { font-size: 0.9rem; font-weight: normal; opacity: 0.9; }
-.check-icon { position: absolute; top: 10px; right: 10px; background: white; color: #2ecc71; width: 25px; height: 25px; border-radius: 50%; font-weight: bold; line-height: 25px; }
-.extras-grid-pop { display: flex; flex-wrap: wrap; gap: 10px; }
-.extra-bubble { background: #f1f2f6; padding: 10px 20px; border-radius: 50px; cursor: pointer; transition: 0.2s; border: 2px solid transparent; font-weight: 500; }
-.extra-bubble:hover { background: #dfe4ea; }
-.extra-bubble.selected { background: #5f27cd; color: white; border-color: #5f27cd; box-shadow: 0 4px 10px rgba(95, 39, 205, 0.3); }
-.tag-price { font-size: 0.8rem; opacity: 0.7; margin-left: 5px; }
-.btn-submit-party { width: 100%; background: #ff4757; color: white; padding: 18px; border: none; border-radius: 15px; font-size: 1.3rem; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; box-shadow: 0 5px 15px rgba(255, 71, 87, 0.4); }
-.btn-submit-party:hover { background: #ff6b81; transform: translateY(-2px); }
-.login-alert-box { background: white; padding: 40px; border-radius: 20px; text-align: center; max-width: 400px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+/* === MIS RESERVAS (NUEVO ESTILO MODERNO) === */
+.historial-layout { background-color: #f1f2f6; min-height: 80vh; padding: 40px 20px; display: flex; justify-content: center; }
+.historial-container { width: 100%; max-width: 800px; }
+.reservas-grid { display: flex; flex-direction: column; gap: 25px; }
 
-/* VISTA DE CONFIRMACIÓN */
-.confirmacion-layout {
-    min-height: 80vh; background: #f9fafb; display: flex; justify-content: center; align-items: center;
-    padding: 60px 20px;
+/* Tarjeta de Reserva Moderna */
+.reserva-card-modern {
+    background: white; border-radius: 16px; overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.08); transition: transform 0.2s;
+    border: 1px solid #f0f0f0;
 }
-.confirmacion-card {
-    background: white; padding: 50px; border-radius: 25px; max-width: 600px; width: 100%;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1); text-align: center;
-    border: 4px solid #2ecc71;
-}
-.header-conf { margin-bottom: 30px; }
-.conf-logo { height: 80px; margin-bottom: 15px; }
-.conf-title { color: #2ecc71; font-size: 2rem; margin-top: 0; }
-.conf-subtitle { color: #576574; font-size: 1.1rem; }
-.conf-qr-box {
-    background: #e9f7ef; padding: 30px; border-radius: 15px; margin: 30px 0;
-    border: 1px solid #c8e6c9;
-}
-.conf-qr-label {
-    font-size: 0.9rem; font-weight: 600; color: #27ae60; display: block;
-}
-.conf-qr-code {
-    font-size: 2rem; font-weight: 800; color: #34495e; display: block;
-    margin-top: 10px;
-}
-.conf-body p { color: #7f8c8d; font-size: 0.9rem; }
-.conf-final-message {
-    padding: 15px; background: #fffde7; border-left: 5px solid #ffcc00;
-    margin-top: 20px; text-align: left; font-style: italic;
-}
-.btn-primary-lg { 
-    background: #ef4444; 
-    color: white; 
-    border: none; 
-    padding: 15px 30px; 
-    border-radius: 10px; 
-    font-weight: bold; 
-    cursor: pointer;
-    font-size: 1.1rem;
-}
-.btn-full { width: 100%; margin-top: 30px; }
+.reserva-card-modern:hover { transform: translateY(-3px); }
 
+/* Cabecera de la tarjeta */
+.card-header-modern {
+    padding: 15px 25px; display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid #f0f0f0;
+}
+.status-badge-modern {
+    padding: 6px 15px; border-radius: 30px; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;
+}
+.status-badge-modern.Pendiente { background: #fff3cd; color: #856404; }
+.status-badge-modern.Confirmado { background: #d4edda; color: #155724; }
+.date-badge { font-weight: 600; color: #555; font-size: 1.1rem; }
 
-/* MIS RESERVAS */
-.historial-layout {
-    background-color: #f1f2f6; 
-    min-height: 80vh; 
-    padding: 40px 20px; 
-    display: flex; 
-    justify-content: center;
-}
-.historial-container {
-    width: 100%; max-width: 900px;
-}
-.historial-container h2 {
-    color: #34495e; 
-    border-bottom: 2px solid #ddd; 
-    padding-bottom: 10px; 
-    margin-bottom: 30px;
-}
-.reservas-grid {
-    display: grid; 
-    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); 
-    gap: 20px;
-}
-.reserva-card {
-    background: white;
-    padding: 20px;
-    border-radius: 15px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-    transition: transform 0.2s;
-}
-.reserva-card:hover {
-    transform: translateY(-5px);
-}
-.reserva-header {
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center; 
-    border-bottom: 1px dashed #eee; 
-    padding-bottom: 10px; 
-    margin-bottom: 10px;
-}
-.reserva-header h4 {
-    margin: 0; 
-    font-weight: 600; 
-    color: #1f2937;
-}
-.r-status {
-    background: #ffecb3; 
-    color: #ff8f00; 
-    padding: 3px 10px; 
-    border-radius: 20px; 
-    font-size: 0.8rem; 
-    font-weight: bold;
-}
-.r-status.Pendiente { background: #fce4ec; color: #d81b60; }
-.r-status.Confirmado { background: #e8f5e9; color: #43a047; }
-.reserva-body p {
-    margin: 5px 0; 
-    font-size: 0.95rem; 
-    color: #4b5563;
-}
-.r-total {
-    margin-top: 10px !important;
-    font-size: 1.1rem !important;
-    color: #2c3e50 !important;
-}
-.r-total strong {
-    color: #27ae60;
-}
-.empty-message {
-    text-align: center;
-    padding: 50px;
-    background: #fff;
-    border-radius: 10px;
-    color: #7f8c8d;
-    font-style: italic;
-}
-.empty-message-user {
-    text-align: center;
-    padding: 50px;
-    background: #fff3e0;
-    border-radius: 10px;
-    color: #e65100;
-    font-weight: bold;
-}
+/* Cuerpo de la tarjeta */
+.card-body-modern { padding: 25px; }
+.pack-title { margin: 0 0 15px 0; color: #2c3e50; font-size: 1.4rem; }
+.details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.details-grid p { margin: 5px 0; color: #666; }
 
+/* Pie de la tarjeta */
+.card-footer-modern {
+    padding: 20px 25px; background: #fafafa; border-top: 1px solid #f0f0f0;
+    display: flex; justify-content: space-between; align-items: center;
+}
+.code-box small, .total-box small { display: block; color: #999; font-size: 0.8rem; margin-bottom: 5px; }
+.code-box strong { font-family: monospace; font-size: 1.2rem; color: #333; background: #eee; padding: 5px 10px; border-radius: 5px; }
+.total-amount { font-size: 1.5rem; font-weight: 900; color: #27ae60; }
+
+/* Estado Vacío */
+.empty-state-card {
+    text-align: center; padding: 50px; background: white; border-radius: 20px; box-shadow: 0 5px 20px rgba(0,0,0,0.05);
+}
+.empty-icon { font-size: 4rem; display: block; margin-bottom: 20px; opacity: 0.5; }
+.empty-state-card h3 { color: #333; margin-bottom: 10px; }
+.empty-state-card p { color: #777; }
+/* ========================================== */
 
 /* ADMIN */
 .admin-layout { background-color: #f1f2f6; min-height: 90vh; padding: 40px 20px; display: flex; justify-content: center; }
-.admin-container { width: 100%; max-width: 1100px; background: white; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.05); overflow: hidden; padding: 30px; }
-.admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 2px solid #f1f2f6; padding-bottom: 20px; }
-.ah-text h2 { margin: 0; color: #2c3e50; font-size: 1.8rem; }
-.ah-text p { margin: 5px 0 0; color: #7f8c8d; }
-.btn-refresh { background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; transition: 0.2s; }
-.btn-refresh:hover { background: #2980b9; }
-.table-wrapper { overflow-x: auto; }
-.modern-table { width: 100%; border-collapse: collapse; min-width: 800px; }
-.modern-table thead th { background-color: #2c3e50; color: white; text-align: left; padding: 15px; font-weight: 600; letter-spacing: 0.5px; }
-.modern-table tbody tr { border-bottom: 1px solid #eee; transition: background 0.2s; }
-.modern-table tbody tr:hover { background-color: #f8f9fa; }
-.modern-table td { padding: 15px; vertical-align: middle; color: #34495e; }
-.td-date, .td-user, .td-event { display: flex; flex-direction: column; }
-.d-day { font-weight: bold; color: #2c3e50; }
-.d-time { font-size: 0.85rem; color: #7f8c8d; }
-.td-user small { color: #95a5a6; }
-.badge-pack { background: #e1f5fe; color: #0288d1; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; margin-bottom: 4px; display: inline-block; }
-.text-center { text-align: center; font-weight: bold; }
-.text-price { font-weight: bold; color: #27ae60; font-size: 1.1rem; }
-.empty-row { text-align: center; padding: 40px; color: #95a5a6; font-style: italic; }
-.empty-row-info { text-align: center; padding: 20px; color: #7f8c8d; font-style: italic; }
+.admin-container { width: 100%; max-width: 1100px; background: white; border-radius: 15px; padding: 30px; }
+.admin-header { display: flex; justify-content: space-between; margin-bottom: 30px; }
+.modern-table { width: 100%; border-collapse: collapse; }
+.modern-table th { background-color: #2c3e50; color: white; padding: 15px; text-align: left; }
+.modern-table td { padding: 15px; border-bottom: 1px solid #eee; }
+.btn-confirm-admin { background: #2ecc71; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; }
+.btn-delete-admin { background: #e74c3c; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; margin-left: 10px; }
+.r-status { background: #ffecb3; color: #ff8f00; padding: 3px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
 
-.admin-section-title { color: #2c3e50; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #ddd; padding-bottom: 5px; font-size: 1.4rem; }
-.mb-4 { margin-bottom: 30px; }
-
-.btn-confirm-admin {
-    background: #2ecc71;
-    color: white;
-    border: none;
-    padding: 8px 15px;
-    border-radius: 5px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: 0.2s;
-    font-size: 0.9rem;
-}
-.btn-confirm-admin:hover {
-    background: #27ae60;
-}
-.btn-delete-admin {
-    background: #e74c3c;
-    color: white;
-    border: none;
-    padding: 8px 15px;
-    border-radius: 5px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: 0.2s;
-    font-size: 0.9rem;
-    margin-left: 10px;
-}
-.btn-delete-admin:hover {
-    background: #c0392b;
-}
-.admin-actions {
-    min-width: 180px;
-}
-.btn-sm { padding: 6px 12px; font-size: 0.85rem; }
-.text-success {
-    color: #27ae60;
-    font-weight: bold;
-    font-size: 0.9rem;
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .hero-section { justify-content: center; padding-right: 0; }
+  .hero-bg { background-position: center top; } 
+  .hero-login-card { width: 100%; margin: 20px; }
+  .precios-hero-section { height: auto; min-height: 50vh; }
+  .gallery-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); grid-auto-rows: 200px; }
+  .ticket-pop-card { width: 100%; max-width: 300px; margin-bottom: 20px; }
+  .footer-content { grid-template-columns: 1fr; }
+  .card-header-modern, .card-footer-modern { flex-direction: column; align-items: flex-start; gap: 15px; }
+  .total-box { align-self: flex-end; }
 }
 </style>
